@@ -1,0 +1,236 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Playfair Display', serif;
+  --font-body: 'DM Sans', sans-serif;
+
+  /* Brand Colors */
+  --color-bg: #FAFAF7;
+  --color-bg-card: #FFFFFF;
+  --color-bg-muted: #F2F0EB;
+  --color-border: #E4E0D8;
+  --color-text: #1C1C1A;
+  --color-text-muted: #6B6760;
+  --color-text-light: #9E9A94;
+
+  --color-primary: #2D6A4F;
+  --color-primary-light: #52B788;
+  --color-primary-muted: #D8F3DC;
+  --color-accent: #D4A853;
+  --color-accent-muted: #FFF3CD;
+  --color-danger: #C0392B;
+  --color-danger-muted: #FDEDEC;
+  --color-warning: #E67E22;
+  --color-warning-muted: #FEF9E7;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
+  --shadow-lg: 0 10px 30px rgba(0,0,0,0.10), 0 4px 10px rgba(0,0,0,0.05);
+  --shadow-xl: 0 20px 60px rgba(0,0,0,0.12), 0 8px 20px rgba(0,0,0,0.06);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg-muted);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-light);
+}
+
+/* Typography */
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* Utility Classes */
+@layer components {
+  .btn-primary {
+    @apply bg-[#2D6A4F] text-white font-semibold px-6 py-3 rounded-xl
+           hover:bg-[#245c43] active:scale-[0.98] transition-all duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
+           shadow-sm hover:shadow-md;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-[#2D6A4F] font-semibold px-6 py-3 rounded-xl
+           border-2 border-[#2D6A4F] hover:bg-[#D8F3DC] active:scale-[0.98]
+           transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply text-[#6B6760] font-medium px-4 py-2 rounded-lg
+           hover:bg-[#F2F0EB] active:scale-[0.98] transition-all duration-200;
+  }
+
+  .card {
+    @apply bg-white rounded-2xl border border-[#E4E0D8] shadow-sm;
+  }
+
+  .card-hover {
+    @apply card hover:shadow-md hover:-translate-y-0.5 transition-all duration-200;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 rounded-xl border border-[#E4E0D8] bg-white
+           text-[#1C1C1A] placeholder-[#9E9A94] text-sm
+           focus:outline-none focus:ring-2 focus:ring-[#52B788] focus:border-transparent
+           transition-all duration-200;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-[#6B6760] mb-1.5;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold;
+  }
+
+  .badge-green {
+    @apply badge bg-[#D8F3DC] text-[#2D6A4F];
+  }
+
+  .badge-amber {
+    @apply badge bg-[#FFF3CD] text-[#D4A853];
+  }
+
+  .badge-red {
+    @apply badge bg-[#FDEDEC] text-[#C0392B];
+  }
+
+  .badge-blue {
+    @apply badge bg-[#EBF5FB] text-[#2980B9];
+  }
+
+  .section-title {
+    @apply font-display text-2xl md:text-3xl font-bold text-[#1C1C1A];
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-[#2D6A4F] to-[#52B788] bg-clip-text text-transparent;
+  }
+
+  .shimmer {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  .meal-card {
+    @apply bg-white rounded-2xl border border-[#E4E0D8] overflow-hidden;
+  }
+
+  .food-row {
+    @apply flex items-start gap-3 p-4 border-b border-[#F2F0EB] last:border-0
+           hover:bg-[#FAFAF7] transition-colors duration-150;
+  }
+
+  .nutrient-pill {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 bg-[#F2F0EB]
+           rounded-full text-xs text-[#6B6760] font-medium;
+  }
+}
+
+/* Animations */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { transform: scale(0.96); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-slide-up { animation: slideUp 0.5s ease-out forwards; }
+.animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+.animate-scale-in { animation: scaleIn 0.3s ease-out forwards; }
+.animate-slide-right { animation: slideInRight 0.4s ease-out forwards; }
+
+/* Stagger children */
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 80ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 160ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 320ms; }
+
+/* Blur lock overlay */
+.blur-lock {
+  position: relative;
+}
+.blur-lock::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 200px;
+  background: linear-gradient(to bottom, transparent, var(--color-bg));
+  pointer-events: none;
+}
+
+/* Progress bar */
+.progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-light));
+  transition: width 0.6s ease-out;
+}
+
+/* Mobile bottom safe area */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
