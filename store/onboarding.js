@@ -19,6 +19,15 @@ export const useOnboardingStore = create(
       updateData: (updates) => set((state) => ({ data: { ...state.data, ...updates } })),
       reset: () => set({ currentStep: 1, data: initialData }),
     }),
-    { name: 'diet-onboarding' }
+    {
+      name: 'diet-onboarding',
+      // Never persist step 4 (the generating screen): rehydrating into it
+      // auto-fires plan generation with whatever old data is in the store.
+      // A refresh mid-generation resumes at step 3 with data intact instead.
+      partialize: (state) => ({
+        data: state.data,
+        currentStep: Math.min(state.currentStep, 3),
+      }),
+    }
   )
 )

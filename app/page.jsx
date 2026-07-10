@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import { Leaf, Target, MapPin, Zap, ChevronRight, Star } from 'lucide-react'
+import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 
 export default async function HomePage() {
   const session = await auth()
@@ -18,9 +19,12 @@ export default async function HomePage() {
             </div>
             <span className="font-display font-bold text-lg text-[#1C1C1A]">NutriPlan AI</span>
           </div>
-          <Link href="/onboarding" className="btn-primary text-sm py-2 px-5">
-            Get My Plan
-          </Link>
+          <div className="flex items-center gap-2">
+            <GoogleSignInButton />
+            <Link href="/onboarding" className="btn-primary text-sm py-2 px-5">
+              Get My Plan
+            </Link>
+          </div>
         </div>
       </nav>
 
@@ -44,7 +48,7 @@ export default async function HomePage() {
               Generate My Diet Plan
               <ChevronRight className="w-4 h-4" />
             </Link>
-            <Link href="/onboarding" className="btn-secondary text-base py-4 px-8">
+            <Link href="/how-it-works" className="btn-secondary text-base py-4 px-8">
               See How It Works
             </Link>
           </div>

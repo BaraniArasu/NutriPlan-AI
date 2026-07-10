@@ -3,10 +3,13 @@
 import { useState } from 'react'
 import { formatCurrency } from '@/lib/utils'
 import { FoodQueryModal } from '@/components/diet/FoodQueryModal'
+import { getStoredQuantities, storeQuantities } from '@/lib/planStorage'
 import { HelpCircle, Plus, Minus, AlertTriangle, Lightbulb, ChevronDown, ChevronUp, IndianRupee } from 'lucide-react'
 
 export function DietMealCard({ meal, userProfile, planId, isLoggedIn }) {
-  const [quantities, setQuantities] = useState({})
+  // Adjusted quantities persist in localStorage (food ids are unique across
+  // the whole plan), so a refresh or reopened tab keeps the user's changes.
+  const [quantities, setQuantities] = useState(() => getStoredQuantities())
   const [queryFood, setQueryFood] = useState(null)
   const [collapsed, setCollapsed] = useState(false)
 
@@ -16,7 +19,12 @@ export function DietMealCard({ meal, userProfile, planId, isLoggedIn }) {
     const current = getQty(food)
     const step = food.unit === 'ml' || food.unit === 'g' ? 25 : 1
     const next = Math.max(step, current + delta * step)
-    setQuantities((q) => ({ ...q, [food.id]: next }))
+    setQuantities((q) => {
+      // Merge over fresh storage so sibling meal cards' writes aren't clobbered
+      const updated = { ...getStoredQuantities(), ...q, [food.id]: next }
+      storeQuantities(updated)
+      return updated
+    })
   }
 
   const totalCalories = meal.foods.reduce((sum, f) => {

@@ -9,11 +9,13 @@ import { DietMealCard } from '@/components/diet/DietMealCard'
 import { LoginPromptOverlay } from '@/components/diet/LoginPromptOverlay'
 import { DietOptimizeButton } from '@/components/diet/DietOptimizeButton'
 import { DietSummaryBar } from '@/components/diet/DietSummaryBar'
+import { EditTargetsModal } from '@/components/diet/EditTargetsModal'
 import { Leaf, ChevronRight, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { getStoredPlan, storePlan, storePlanId } from '@/lib/planStorage'
 
 export default function DietPage() {
-  const { data: session, status } = useSession()
+  const { status } = useSession()
   const router = useRouter()
 
   const [plan, setPlan] = useState(null)
@@ -22,43 +24,62 @@ export default function DietPage() {
   const [activeDay, setActiveDay] = useState(0)
   const [loading, setLoading] = useState(true)
   const [generatingDay, setGeneratingDay] = useState(false)
-  const hasSaved = useRef(false)
+  const [editingTargets, setEditingTargets] = useState(false)
+  const syncState = useRef({ inFlight: false, syncedDays: 0 })
+
+  const handleSaveTargets = (targets) => {
+    const updatedPlan = { ...plan, ...targets }
+    setPlan(updatedPlan)
+    storePlan(updatedPlan)
+    syncState.current.syncedDays = -1 // force a DB re-sync with the new targets
+    setEditingTargets(false)
+    toast.success('Targets updated — new days will aim at them.')
+  }
 
   useEffect(() => {
-    const stored = sessionStorage.getItem('dietPlan')
-    const profile = sessionStorage.getItem('userProfile')
-    const id = sessionStorage.getItem('planId')
+    const { plan: stored, profile, planId: id } = getStoredPlan()
 
     if (!stored) {
       router.push('/onboarding')
       return
     }
 
-    setPlan(JSON.parse(stored))
-    if (profile) setUserProfile(JSON.parse(profile))
+    setPlan(stored)
+    if (profile) setUserProfile(profile)
     if (id) setPlanId(id)
     setLoading(false)
   }, [])
 
-  // Save plan to DB once when user logs in — no re-generation
+  // Keep the DB copy in sync for logged-in users: creates the plan record on
+  // first save (whether they logged in before onboarding or just now), then
+  // updates it whenever a new day is generated.
   useEffect(() => {
-    if (!session?.user || !plan || planId || hasSaved.current) return
-    hasSaved.current = true
+    if (status !== 'authenticated' || !plan || !userProfile) return
+    const s = syncState.current
+    if (s.inFlight) return
+    if (planId && s.syncedDays === plan.days.length) return
 
+    s.inFlight = true
     fetch('/api/diet/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plan, profileData: userProfile }),
+      body: JSON.stringify({ plan, profileData: userProfile, planId }),
     })
-      .then((r) => r.json())
-      .then(({ planId: id }) => {
-        if (id) {
-          setPlanId(id)
-          sessionStorage.setItem('planId', id)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.planId) {
+          s.syncedDays = plan.days.length
+          if (data.planId !== planId) {
+            setPlanId(data.planId)
+            storePlanId(data.planId)
+          }
         }
       })
       .catch(() => {})
-  }, [session, plan])
+      .finally(() => {
+        s.inFlight = false
+      })
+  }, [status, plan, planId, userProfile])
 
   const handleGenerateNextDay = async () => {
     if (!plan || !userProfile || generatingDay) return
@@ -79,22 +100,30 @@ export default function DietPage() {
         body: JSON.stringify({
           profileData: userProfile,
           dayNumber: nextDayNumber,
-          calorieTarget: plan.calorieTarget,
+          targets: {
+            calories: plan.calorieTarget,
+            protein: plan.proteinTarget,
+            carbs: plan.carbsTarget,
+            fat: plan.fatTarget,
+          },
           previousFoods,
           saveToDb: false,
         }),
       })
 
-      if (!res.ok) throw new Error('Generation failed')
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || 'Generation failed')
+      }
       const { day } = await res.json()
 
       const updatedPlan = { ...plan, days: [...plan.days, day] }
       setPlan(updatedPlan)
-      sessionStorage.setItem('dietPlan', JSON.stringify(updatedPlan))
+      storePlan(updatedPlan)
       setActiveDay(nextDayNumber - 1)
       toast.success(`Day ${nextDayNumber} ready!`, { id: toastId })
-    } catch {
-      toast.error('Failed to generate next day. Please try again.', { id: toastId })
+    } catch (err) {
+      toast.error(err.message || 'Failed to generate next day. Please try again.', { id: toastId })
     } finally {
       setGeneratingDay(false)
     }
@@ -141,7 +170,7 @@ export default function DietPage() {
           </div>
         )}
 
-        <DietSummaryBar day={currentDay} target={plan.calorieTarget} />
+        <DietSummaryBar plan={plan} day={currentDay} onEditTargets={() => setEditingTargets(true)} />
 
         <div className="space-y-4 mt-4">
           {mealsToShow.map((meal, idx) => (
@@ -204,9 +233,18 @@ export default function DietPage() {
         )}
 
         {isLoggedIn && (
-          <DietOptimizeButton plan={plan} userProfile={userProfile} />
+          <DietOptimizeButton plan={plan} userProfile={userProfile} planId={planId} />
         )}
       </div>
+
+      {editingTargets && (
+        <EditTargetsModal
+          plan={plan}
+          userProfile={userProfile}
+          onSave={handleSaveTargets}
+          onClose={() => setEditingTargets(false)}
+        />
+      )}
     </div>
   )
 }

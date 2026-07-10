@@ -11,6 +11,10 @@ export function DietHeader({ plan, userProfile }) {
   const { data: session } = useSession()
   const router = useRouter()
 
+  // Older AI-generated plans stored water in ml (e.g. 3000); targets are now
+  // computed in liters. Normalize so we never render "3000L".
+  const waterLiters = plan.waterIntake > 100 ? Math.round(plan.waterIntake / 100) / 10 : plan.waterIntake
+
   return (
     <header className="sticky top-0 z-40 bg-[#FAFAF7]/95 backdrop-blur-sm border-b border-[#E4E0D8]">
       <div className="max-w-3xl mx-auto px-4">
@@ -78,7 +82,7 @@ export function DietHeader({ plan, userProfile }) {
             </span>
             <span className="flex items-center gap-1">
               <Droplets className="w-3 h-3 text-blue-400" />
-              <strong className="text-[#1C1C1A]">{plan.waterIntake}L</strong> water
+              <strong className="text-[#1C1C1A]">{waterLiters}L</strong> water
             </span>
           </div>
         </div>

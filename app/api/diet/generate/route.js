@@ -1,13 +1,28 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { generatePlanMeta, generateDayPlan } from '@/lib/openai'
+import { generatePlanMeta, generateDayPlan } from '@/lib/ai'
 import { validateProfile } from '@/lib/utils'
+import { calculateNutritionTargets } from '@/lib/nutrition'
+import { rateLimit, rateLimitIdentity } from '@/lib/rate-limit'
+
+// 20/hour covers ~2 full plan generations (1 meta + 7 day calls each)
+const LIMIT = { limit: 20, windowMs: 60 * 60 * 1000 }
 
 export async function POST(req) {
   try {
+    const session = await auth()
+
+    const { ok, retryAfterSeconds } = rateLimit(rateLimitIdentity(session, req, 'generate'), LIMIT)
+    if (!ok) {
+      return NextResponse.json(
+        { error: `Too many plan generations. Please try again in ${Math.ceil(retryAfterSeconds / 60)} minute(s).` },
+        { status: 429 }
+      )
+    }
+
     const body = await req.json()
-    const { profileData, dayNumber, calorieTarget, previousFoods } = body
+    const { profileData, dayNumber, targets, calorieTarget, previousFoods } = body
 
     // Validate profile completeness
     const validationError = validateProfile(profileData)
@@ -35,19 +50,45 @@ export async function POST(req) {
       preferredCuisine: profileData.preferredCuisine || 'local',
     }
 
-    // Case 1: Generate plan metadata only
+    // Case 1: Plan metadata. Nutrition numbers come from deterministic math
+    // (Mifflin-St Jeor BMR, TDEE, timeline-based calorie adjustment, g/kg
+    // protein) — the AI only writes the summary text and weekly tips, and
+    // its numbers are always overridden. If the AI text call fails, fall
+    // back to a plain template so target calculation never depends on it.
     if (dayNumber === undefined || dayNumber === null) {
-      const meta = await generatePlanMeta(profile)
-      return NextResponse.json({ meta })
+      const computed = calculateNutritionTargets(profile)
+      let text = {
+        title: `Personalized Diet Plan for ${profile.name}`,
+        summary: `A ${profile.goal.replace('_', ' ')} plan built around ${profile.city}'s local foods within your daily budget. Targets are calculated from your BMR, activity level, and timeline.`,
+        weeklyNotes: [
+          'Drink water before every meal to help portion control.',
+          'Eat slowly — it takes ~20 minutes for fullness to register.',
+          'A short walk after meals helps digestion and blood sugar.',
+        ],
+      }
+      try {
+        const aiMeta = await generatePlanMeta(profile)
+        text = { title: aiMeta.title || text.title, summary: aiMeta.summary || text.summary, weeklyNotes: aiMeta.weeklyNotes || text.weeklyNotes }
+      } catch (err) {
+        console.error('AI meta text failed, using template:', err?.message)
+      }
+      return NextResponse.json({ meta: { ...text, ...computed } })
     }
 
-    // Case 2: Generate a specific day
-    const day = await generateDayPlan(profile, dayNumber, calorieTarget, previousFoods || [])
+    // Case 2: Generate a specific day, aiming at all macro targets (falls
+    // back to computing them if an older client only sent calorieTarget).
+    const dayTargets = targets || {
+      calories: calorieTarget,
+      ...(() => {
+        const c = calculateNutritionTargets(profile)
+        return { protein: c.proteinTarget, carbs: c.carbsTarget, fat: c.fatTarget }
+      })(),
+    }
+    const day = await generateDayPlan(profile, dayNumber, dayTargets, previousFoods || [])
 
-    // Save to DB only if user is logged in — Day 1 creates the plan record
-    const session = await auth()
-    let planId = null
-
+    // Keep the logged-in user's profile current on Day 1. The DietPlan record
+    // itself is created/updated by /api/diet/save (the client syncs the full
+    // plan there) — creating it here with empty planData left orphaned rows.
     if (session?.user?.id && dayNumber === 1) {
       await prisma.userProfile.upsert({
         where: { userId: session.user.id },
@@ -73,21 +114,17 @@ export async function POST(req) {
           location: `${profile.city}, ${profile.country}`,
         },
       })
-
-      const saved = await prisma.dietPlan.create({
-        data: {
-          userId: session.user.id,
-          title: `Diet Plan for ${profile.name}`,
-          planData: {},
-          isActive: true,
-        },
-      })
-      planId = saved.id
     }
 
-    return NextResponse.json({ day, planId })
+    return NextResponse.json({ day })
   } catch (error) {
     console.error('Diet generation error:', error)
+    if (error?.status === 401 || error?.status === 403) {
+      return NextResponse.json(
+        { error: `AI provider rejected the API key (expired or invalid). Update the ${process.env.AI_PROVIDER || 'groq'} key in .env and restart.` },
+        { status: 500 }
+      )
+    }
     return NextResponse.json({ error: 'Failed to generate diet plan. Please try again.' }, { status: 500 })
   }
 }

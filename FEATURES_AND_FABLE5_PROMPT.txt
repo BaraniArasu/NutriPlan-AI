@@ -1,0 +1,282 @@
+================================================================================
+NUTRIPLAN AI — FEATURE INVENTORY & FABLE 5 IMPROVEMENT PROMPT
+Generated from a direct read of the codebase on 2026-07-03.
+================================================================================
+
+--------------------------------------------------------------------------------
+PART 1 — WHAT THE APP CURRENTLY DOES (verified against the actual code)
+--------------------------------------------------------------------------------
+
+1. AUTHENTICATION & ACCOUNTS
+   - Google OAuth sign-in via NextAuth v5, session/account data stored in
+     Postgres through the Prisma adapter.
+   - Middleware redirects unauthenticated users away from /dashboard to
+     /auth/signin with a callbackUrl back to where they were headed.
+   - The app works fully for anonymous (logged-out) visitors too — diet plan
+     generation does not require an account.
+
+2. ONBOARDING (3 steps + a generating screen)
+   - Step 1 — Personal info: name, age, gender, weight, height, optional body
+     measurements (chest/waist/hips/arms/thighs), metric/imperial toggle.
+   - Step 2 — Goals: target weight, timeline in weeks, activity level, and a
+     safety check (getTimelineWarning) that warns when the requested rate of
+     weight change exceeds 1–1.5 kg/week and suggests a safer timeline.
+   - Step 3 — Location & preferences: city/country (with browser geolocation
+     auto-detect via navigator.geolocation), diet type (veg/non-veg/vegan),
+     allergies, disliked foods, preferred cuisine, daily budget.
+   - Step 4 — Generating screen: loading animation while the plan is built.
+   - All onboarding state lives in a Zustand store persisted to localStorage
+     (store/onboarding.js), so a refresh mid-flow doesn't lose progress.
+   - Server-side validation (lib/utils.js validateProfile) re-checks the
+     required fields before generation, independent of client-side checks.
+
+3. AI DIET GENERATION — MULTI-PROVIDER (lib/ai/)
+   - Four interchangeable AI providers: Groq (free, default), OpenAI, Google
+     Gemini, and Anthropic Claude — switched with a single env var
+     (AI_PROVIDER=groq|openai|gemini|anthropic), no code changes required.
+   - Each provider has its own per-model tuning: Anthropic uses structured
+     JSON-schema output (output_config.format) with effort levels tuned per
+     task; OpenAI and Groq use JSON-mode response_format; Gemini uses
+     responseMimeType. Per-provider model overrides via GROQ_MODEL,
+     OPENAI_MODEL, GEMINI_MODEL, ANTHROPIC_MODEL.
+   - generatePlanMeta(profile): computes calorie/macro/water targets and a
+     short plan summary from BMI, goal, activity level, etc.
+   - generateDayPlan(...): generates one day at a time (7 meal slots — early
+     morning, breakfast, mid-morning, lunch, evening, dinner, post-dinner),
+     explicitly avoiding foods used in the last 15 items across previous days,
+     using local-to-the-user's-city foods and prices in the user's currency.
+   - askFoodQuestion(...) / optimizeDietPlan(...): conversational endpoints for
+     "what about this specific food" and "help me adjust my whole plan."
+
+4. DIET PLAN VIEWING & INTERACTION (/diet)
+   - Day-by-day tabs; only days generated so far are unlocked, next day is
+     generated on demand ("Generate Day N" button), up to 7 days total.
+   - Per-meal cards: collapsible, show macros, a daily tip banner, and a
+     running nutrition summary bar (DietSummaryBar) against the day's target.
+   - Quantity adjustment: +/- controls on each food item recompute that food's
+     calories/protein/carbs/fat proportionally in real time (client-side only
+     — see Part 2, item 6).
+   - Food Q&A: a "?" icon on every food item opens a modal (FoodQueryModal)
+     that asks the AI a question scoped to that specific food + the user's
+     profile/goal.
+   - Plan optimizer: a floating button (DietOptimizeButton) for free-form
+     questions about the whole plan (cheat meals, swaps, etc.), only shown to
+     logged-in users.
+   - Anonymous/logged-out gating: logged-out visitors see only the first 2
+     meals of a day and a login prompt overlay for the rest; once 7 days are
+     generated, logged-out users are also prompted to log in to continue past
+     day limits.
+   - Plan + profile are held in sessionStorage on the client so the flow
+     survives a page refresh within the same tab (but not a closed tab — see
+     Part 2, item 8).
+
+5. DASHBOARD (/dashboard, auth required)
+   - BMI (calculated + categorized: underweight/normal/overweight/obese),
+     current vs. target weight, activity level, days-to-goal projection
+     (weekly kg target derived from timeline).
+   - "Goal Progress" card — see Part 2, item 5, this currently renders a
+     hardcoded bar, not real progress.
+   - List of the user's saved diet plans (most recent 10) with an "Active"
+     badge, and a one-click "Generate New Diet Plan" entry point.
+
+6. DATA PERSISTENCE (Prisma / Postgres)
+   - Models: User, Account, Session, VerificationToken (NextAuth), plus
+     UserProfile (1:1 with User), DietPlan (planData stored as JSON, plus
+     weekNumber/isActive/notes fields), ChatMessage (role + content + optional
+     food context, linked to a DietPlan).
+   - Chat history for the food-Q&A flow is persisted per plan for logged-in
+     users. (Optimizer chat is not — see Part 2, item 1.)
+   - A plan generated anonymously and later claimed by logging in gets its
+     full planData saved via a dedicated /api/diet/save endpoint.
+
+7. TECH STACK
+   Next.js 14 (App Router) · NextAuth v5 (beta) + Google OAuth + Prisma
+   adapter · PostgreSQL via Prisma ORM 5 · Zustand (persisted) · Tailwind CSS +
+   Radix UI primitives · Groq SDK / OpenAI SDK / @google/generative-ai /
+   @anthropic-ai/sdk behind the lib/ai/ provider switch · react-hot-toast ·
+   date-fns · framer-motion · zod.
+
+--------------------------------------------------------------------------------
+PART 2 — SPECIFIC ISSUES FOUND DURING THIS REVIEW
+(grounded in the actual code — not guesses; verify before fixing, but these
+are real, not hypothetical)
+--------------------------------------------------------------------------------
+
+1. Optimizer chat isn't saved. app/api/diet/optimize/route.js never writes
+   to ChatMessage, unlike app/api/food/query/route.js which does. A logged-in
+   user's "optimize my plan" conversation disappears on refresh while their
+   food-question conversation doesn't. Inconsistent and almost certainly
+   unintended.
+
+2. Diet plans created for already-logged-in users can save empty data.
+   app/api/diet/generate/route.js creates a DietPlan row with planData: {}
+   when dayNumber === 1 and the user is already logged in, and stores that
+   returned planId client-side. Later, app/diet/page.jsx's "save on login"
+   effect explicitly skips saving (via the `|| planId` guard) whenever a
+   planId is already set — which it now always is for users who started
+   logged in. Net effect: users who are logged in from the start of
+   onboarding likely end up with a DietPlan row whose planData is
+   permanently `{}`, while users who log in mid-flow get the real data saved
+   via /api/diet/save. This needs a single, consistent source of truth for
+   "when does the full 7-day plan get written to the DB."
+
+3. Dashboard "Goal Progress" bar is hardcoded. In
+   components/dashboard/DashboardClient.jsx, the progress fill width is
+   `Math.max(5, Math.min(95, 20))` — literally always 20%, regardless of the
+   user's actual weight or time elapsed. There is no weight-logging feature
+   backing it, so the number is fabricated. Either build real progress
+   tracking or remove the visual until there's real data behind it.
+
+4. No rate limiting on AI-calling routes. /api/diet/generate,
+   /api/diet/optimize, and /api/food/query all call a paid (or free-tier
+   rate-limited) AI provider and are reachable by anonymous users with no
+   throttling. This is a real cost/abuse exposure once a paid provider
+   (OpenAI/Gemini/Anthropic) is selected via AI_PROVIDER.
+
+5. Quantity adjustments aren't persisted. The +/- quantity controls in
+   DietMealCard.jsx only update local component state (`quantities`) — a
+   page refresh silently reverts every food back to its AI-generated default
+   quantity, with no save-back to sessionStorage, the DB, or even a toast
+   warning the user that changes aren't saved.
+
+6. Anonymous plans are lost on tab close. Plan + profile only live in
+   sessionStorage, not localStorage, so a logged-out user who closes the tab
+   (rather than just refreshing) loses their generated plan with no recovery
+   path and no warning that this will happen.
+
+7. README is out of date. It still describes a Gemini/GPT-4o-only setup,
+   references .ts/.tsx files that don't exist in this codebase (it's .js/
+   .jsx throughout), and predates the lib/ai/ multi-provider system entirely.
+   It should reflect the actual current architecture.
+
+8. weekNumber exists but is unused. DietPlan.weekNumber is always 1 with no
+   code path that increments it or offers "continue to week 2" — either wire
+   it up or drop it from the mental model of the schema.
+
+9. No automated tests. There is no test runner, no unit tests for the
+   AI-provider JSON parsing/validation, and no coverage for the profile
+   validation logic — the kind of code most likely to silently break when
+   models or prompts change.
+
+--------------------------------------------------------------------------------
+PART 3 — THE PROMPT TO PASTE INTO CLAUDE FABLE 5
+Copy everything between the ==== lines below as your first message to Fable 5
+(claude-fable-5) — in Claude Code, on claude.ai, or via the API. Send it whole,
+in one turn. If driving it via the API, use effort: high or xhigh. Expect a
+long turn (this is a real, multi-part piece of work) — that's normal, let it run.
+--------------------------------------------------------------------------------
+
+================================================================================
+You are polishing an existing Next.js diet/nutrition app. Read the actual code
+before changing anything — the notes below come from a real review of this
+repo, but verify each one yourself rather than taking it on faith, and stop to
+ask if something doesn't match what you find.
+
+WHAT THIS APP IS
+Next.js 14 (App Router), NextAuth v5 with Google OAuth + Prisma adapter,
+Postgres via Prisma, Zustand for onboarding state, Tailwind + Radix UI, and a
+provider-switching AI layer at lib/ai/ (Groq/OpenAI/Gemini/Anthropic, chosen
+via the AI_PROVIDER env var).
+
+NON-NEGOTIABLE: EVERY EXISTING FEATURE MUST STILL WORK WHEN YOU'RE DONE
+Do not remove, simplify away, or silently change the behavior of:
+- Google OAuth sign-in, Prisma-backed sessions/accounts, the /dashboard
+  auth-gate in middleware.js
+- The 4-step onboarding flow (personal info, goals + timeline safety warning,
+  location + geolocation + food preferences, generating screen) and its
+  Zustand store
+- The Dashboard (BMI, weight targets, activity level, plan list) and the Diet
+  page (day tabs with on-demand generation up to 7 days, meal cards with
+  quantity +/- adjustment, food Q&A modal, plan optimizer button, login-gate
+  overlay for anonymous users)
+- Diet plan generation itself: per-day generation with no repeated meals
+  across days, respecting budget/allergies/diet type/goal/local city foods
+- The AI_PROVIDER env-based switch across all four providers in lib/ai/ — a
+  missing API key for a provider the user isn't using must never crash the
+  app
+- The Prisma schema and any existing user data (profiles, saved plans, chat
+  history) — migrations must be additive/backward-compatible, never
+  destructive
+
+If something below conflicts with one of these, ask first — this is real
+software with real users, not a rewrite.
+
+FIX THESE SPECIFIC, VERIFIED ISSUES
+1. app/api/diet/optimize/route.js never persists chat history to
+   ChatMessage, unlike app/api/food/query/route.js which does. Make the
+   optimizer conversation persist the same way, for logged-in users with a
+   planId.
+2. There is a real risk that DietPlan.planData ends up permanently `{}` for
+   users who are logged in from the very start of onboarding: app/api/
+   diet/generate/route.js creates the DietPlan row with empty planData on
+   day 1 for already-logged-in users, and app/diet/page.jsx's save-on-login
+   effect then skips saving via /api/diet/save because planId is already
+   set. Trace this end to end and make sure the full 7-day plan always ends
+   up saved with real data for logged-in users, however they got logged in,
+   without creating duplicate DietPlan rows.
+3. components/dashboard/DashboardClient.jsx renders a "Goal Progress" bar
+   whose fill is hardcoded to 20% (`Math.max(5, Math.min(95, 20))`) —
+   verify, then either implement real progress (e.g. track weight-log
+   entries over time and compute actual % toward goal) or remove the
+   fabricated number until there's real data to back it.
+4. Add rate limiting to /api/diet/generate, /api/diet/optimize, and
+   /api/food/query — they call metered AI providers and are reachable by
+   anonymous users today.
+5. The quantity +/- adjuster on food items (components/diet/DietMealCard.jsx)
+   only changes local component state and is silently lost on refresh. Either
+   persist adjusted quantities (sessionStorage at minimum, DB for logged-in
+   users) or clearly signal to the user that changes are session-only.
+6. Anonymous users lose their generated plan if they close the tab, because
+   plan/profile state is sessionStorage-only. Decide deliberately whether to
+   move this to localStorage, prompt users to log in before generation starts,
+   or explicitly warn them their plan is temporary — don't leave it as a
+   silent trap.
+7. README.md is stale — it describes a single-provider (Gemini/GPT-4o) setup
+   and references .ts/.tsx files that don't exist in this (.js/.jsx) codebase.
+   Rewrite it to match the current architecture, including the lib/ai/
+   multi-provider system and how to switch providers via AI_PROVIDER.
+
+CONSIDER THESE ADDITIONS (use judgment — only add what genuinely fits without
+expanding scope for its own sake)
+- Real progress tracking: a simple weight-log table (date + weight) so the
+  Goal Progress bar (item 3 above) and a "weight over time" mini-chart can be
+  driven by actual data instead of a placeholder.
+- Multi-week plan continuation: DietPlan.weekNumber already exists in the
+  schema but nothing increments it or offers "continue to week 2 from where
+  I left off" — either wire this up as a real feature or remove the unused
+  field so the schema doesn't imply a feature that isn't there.
+- Basic automated tests: at minimum, tests for lib/ai/prompts.js's JSON
+  parsing/validation helpers and lib/utils.js's validateProfile/BMI/timeline
+  logic, since these are the most likely to silently break when prompts or
+  models change.
+- An account/profile settings page so a logged-in user can edit their
+  UserProfile (weight, goals, allergies, etc.) without re-running the entire
+  onboarding flow from scratch.
+- A basic account-deletion path (cascading through Prisma's onDelete:
+  Cascade relations, which already exist in the schema) for privacy/
+  compliance — check whether one already exists before building it.
+
+HOW TO WORK
+Establish your own way of checking your work as you go: run the build,
+actually exercise the flows you touched (don't just read the code and assume
+it works), and don't report something as fixed until you've seen it work.
+When you're done, give me a concise summary grouped by area (bug fixes, new
+features, anything you decided not to touch and why) — not a file-by-file
+diff narration. Don't add abstractions or refactors beyond what's needed for
+the above; this is a hardening and polish pass, not a rewrite. If you find
+something in your own review that isn't on this list but is clearly broken,
+fix it and tell me — but don't go looking for unrelated things to change.
+================================================================================
+
+--------------------------------------------------------------------------------
+NOTES
+--------------------------------------------------------------------------------
+- Fable 5 (claude-fable-5) is priced above Claude Opus 4.8 and is built for
+  the hardest, most autonomous, long-horizon work. This prompt will also work
+  close to as-is on Opus 4.8 if you want a cheaper pass — swap nothing but the
+  model name. Fable 5's edge shows up most on exactly this kind of large,
+  ambiguous, multi-file, "don't break anything" task.
+- Everything in Part 2 was found by directly reading the current code on
+  2026-07-03, not inferred — but code changes over time, so have Fable 5
+  re-verify each item against the live repo before fixing it, in case
+  something has already moved since this file was written.

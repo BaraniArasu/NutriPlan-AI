@@ -4,12 +4,14 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useOnboardingStore } from '@/store/onboarding'
 import { validateProfile } from '@/lib/utils'
+import { storePlan, storeProfile, storePlanId, clearStoredQuantities } from '@/lib/planStorage'
 import { Leaf, AlertTriangle } from 'lucide-react'
 
 export function StepGenerating() {
-  const { data, setStep } = useOnboardingStore()
+  const { data, setStep, reset } = useOnboardingStore()
   const [status, setStatus] = useState('Calculating your nutrition targets...')
   const [error, setError] = useState('')
+  const [retryKey, setRetryKey] = useState(0)
   const router = useRouter()
   const hasCalled = useRef(false)
 
@@ -45,7 +47,12 @@ export function StepGenerating() {
           body: JSON.stringify({
             profileData: data,
             dayNumber: 1,
-            calorieTarget: meta.calorieTarget,
+            targets: {
+              calories: meta.calorieTarget,
+              protein: meta.proteinTarget,
+              carbs: meta.carbsTarget,
+              fat: meta.fatTarget,
+            },
             previousFoods: [],
             saveToDb: false,
           }),
@@ -59,11 +66,15 @@ export function StepGenerating() {
         const plan = { ...meta, days: [day] }
 
         setStatus('Almost ready!')
-        sessionStorage.setItem('dietPlan', JSON.stringify(plan))
-        sessionStorage.setItem('userProfile', JSON.stringify(data))
-        sessionStorage.removeItem('planId')
+        storePlan(plan)
+        storeProfile(data)
+        storePlanId(null)
+        clearStoredQuantities()
 
         router.push('/diet')
+        // Leave the store clean so the next "Generate New Diet Plan" starts
+        // fresh at step 1 instead of re-running with this run's data.
+        reset()
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Something went wrong'
         setError(message)
@@ -71,7 +82,7 @@ export function StepGenerating() {
     }
 
     generate()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [retryKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (error) {
     return (
@@ -82,7 +93,11 @@ export function StepGenerating() {
         <p className="text-[#C0392B] font-medium mb-2">Something went wrong</p>
         <p className="text-sm text-[#6B6760] mb-6 max-w-xs mx-auto">{error}</p>
         <button
-          onClick={() => { hasCalled.current = false; setError('') }}
+          onClick={() => {
+            hasCalled.current = false
+            setError('')
+            setRetryKey((k) => k + 1)
+          }}
           className="btn-primary"
         >
           Try Again

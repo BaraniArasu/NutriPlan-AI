@@ -1,19 +1,63 @@
 'use client'
 
+import { useState } from 'react'
 import { signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
+import toast from 'react-hot-toast'
 import { formatCurrency, calculateBMI, getBMICategory } from '@/lib/utils'
-import { Leaf, Plus, LogOut, Calendar, Target, Scale, Activity, ChevronRight, Clock, User } from 'lucide-react'
+import { Leaf, Plus, LogOut, Calendar, Target, Scale, Activity, ChevronRight, Clock, User, TrendingUp } from 'lucide-react'
 import { format } from 'date-fns'
 
-export function DashboardClient({ user, profile, plans }) {
+export function DashboardClient({ user, profile, plans, weightLogs = [] }) {
   const router = useRouter()
+  const [weightInput, setWeightInput] = useState('')
+  const [savingWeight, setSavingWeight] = useState(false)
 
   const bmi = profile ? Number(calculateBMI(profile.weight, profile.height)) : null
   const bmiInfo = bmi ? getBMICategory(bmi) : null
   const weightDiff = profile ? (profile.targetWeight - profile.weight).toFixed(1) : null
+
+  // Real progress: from the first logged weight (the starting point recorded
+  // at onboarding) toward the target, using the latest logged weight.
+  const startWeight = weightLogs[0]?.weight ?? profile?.weight
+  const currentWeight = weightLogs[weightLogs.length - 1]?.weight ?? profile?.weight
+  const lastLog = weightLogs[weightLogs.length - 1]
+  let progressPct = null
+  if (profile && startWeight != null) {
+    const totalChange = startWeight - profile.targetWeight
+    progressPct = totalChange === 0
+      ? 100
+      : Math.max(0, Math.min(100, ((startWeight - currentWeight) / totalChange) * 100))
+  }
+
+  const handleLogWeight = async () => {
+    const value = Number(weightInput)
+    if (!Number.isFinite(value) || value < 20 || value > 400) {
+      toast.error('Please enter a valid weight in kg.')
+      return
+    }
+    setSavingWeight(true)
+    try {
+      const res = await fetch('/api/user/weight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weight: value }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error || 'Failed to save weight')
+      }
+      toast.success('Weight logged!')
+      setWeightInput('')
+      router.refresh()
+    } catch (err) {
+      toast.error(err.message || 'Failed to save weight.')
+    } finally {
+      setSavingWeight(false)
+    }
+  }
 
   const goalLabel = {
     weight_loss: '🔥 Weight Loss',
@@ -103,16 +147,46 @@ export function DashboardClient({ user, profile, plans }) {
             <div className="flex items-center gap-4 mb-3">
               <div className="flex-1">
                 <div className="flex justify-between text-xs text-[#9E9A94] mb-1">
-                  <span>{profile.weight} kg</span>
-                  <span>{profile.targetWeight} kg</span>
+                  <span>Started {startWeight} kg</span>
+                  <span className="font-medium text-[#1C1C1A]">{progressPct != null ? `${Math.round(progressPct)}%` : ''}</span>
+                  <span>Goal {profile.targetWeight} kg</span>
                 </div>
                 <div className="progress-bar">
                   <div
                     className="progress-bar-fill"
-                    style={{ width: `${Math.max(5, Math.min(95, 20))}%` }}
+                    style={{ width: `${progressPct != null ? Math.max(2, progressPct) : 2}%` }}
                   />
                 </div>
+                {lastLog && (
+                  <p className="text-[11px] text-[#9E9A94] mt-1 flex items-center gap-1">
+                    <TrendingUp className="w-3 h-3" />
+                    Last logged {lastLog.weight} kg on {format(new Date(lastLog.createdAt), 'MMM d')}
+                  </p>
+                )}
               </div>
+            </div>
+
+            <div className="flex gap-2 mb-3">
+              <input
+                type="number"
+                inputMode="decimal"
+                min="20"
+                max="400"
+                step="0.1"
+                placeholder="Log today's weight (kg)"
+                className="input-field flex-1 text-sm py-2"
+                value={weightInput}
+                onChange={(e) => setWeightInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLogWeight()}
+                aria-label="Log today's weight in kilograms"
+              />
+              <button
+                onClick={handleLogWeight}
+                disabled={savingWeight || !weightInput}
+                className="btn-primary py-2 px-4 text-sm disabled:opacity-50"
+              >
+                {savingWeight ? 'Saving…' : 'Log'}
+              </button>
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="bg-[#F2F0EB] rounded-xl p-3">

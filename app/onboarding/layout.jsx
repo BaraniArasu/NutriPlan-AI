@@ -1,5 +1,6 @@
 import { Leaf } from 'lucide-react'
 import Link from 'next/link'
+import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 
 export default function OnboardingLayout({ children }) {
   return (
@@ -12,7 +13,10 @@ export default function OnboardingLayout({ children }) {
             </div>
             <span className="font-display font-bold text-[#1C1C1A]">NutriPlan AI</span>
           </Link>
-          <span className="text-xs text-[#9E9A94]">Setup your plan</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[#9E9A94] hidden sm:inline">Setup your plan</span>
+            <GoogleSignInButton />
+          </div>
         </div>
       </header>
       <main>{children}</main>

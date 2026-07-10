@@ -1,6 +1,6 @@
 # 🥗 NutriPlan AI — Personalized Diet Chart App
 
-A full-stack Next.js 14 application that generates personalized 7-day AI-powered diet plans based on user profile, location, goals, and food preferences.
+A full-stack Next.js 14 application that generates personalized 7-day AI-powered diet plans based on user profile, location, goals, and food preferences — with a pluggable AI backend (Groq, OpenAI, Gemini, or Anthropic Claude) switched by a single environment variable.
 
 ---
 
@@ -9,26 +9,63 @@ A full-stack Next.js 14 application that generates personalized 7-day AI-powered
 | Layer | Technology |
 |-------|-----------|
 | Framework | Next.js 14 (App Router) |
-| Authentication | NextAuth v5 (Google OAuth) |
+| Authentication | NextAuth v5 (Google OAuth) + Prisma adapter |
 | Database | PostgreSQL via Prisma ORM |
-| AI | Google Gemini 2.0 Flash |
-| Styling | Tailwind CSS |
-| State | Zustand (with persistence) |
+| AI | Multi-provider: Groq (free, default) / OpenAI / Google Gemini / Anthropic Claude |
+| Styling | Tailwind CSS + Radix UI primitives |
+| State | Zustand (persisted) |
 | Fonts | Playfair Display + DM Sans |
 
 ---
 
 ## 📋 Features
 
-1. **3-Step Onboarding** — Personal info, goals with timeline warnings, location & food preferences
-2. **AI Diet Generation** — GPT-4o creates a unique 7-day plan with local foods & INR prices
-3. **Interactive Diet View** — Expand/collapse meals, adjust food quantities with +/−
-4. **Food Q&A** — Click the ❓ icon on any food for AI-powered answers
-5. **Plan Optimizer** — Floating button to ask diet questions (cheat meals, adjustments)
-6. **Login Gate** — Shows first 2 meals free, login to unlock full 7-day plan
-7. **Auto-save** — Plans saved to DB on login, accessible from dashboard
-8. **Dashboard** — View BMI, goals, history, generate new plans
-9. **Mobile-first** — Fully responsive, touch-optimized UI
+1. **3-Step Onboarding** — Personal info, goals with timeline safety warnings, location (geolocation auto-detect) & food preferences
+2. **AI Diet Generation** — Day-by-day 7-day plan with local foods, real prices in your currency, and no repeated meals across days
+3. **Interactive Diet View** — Expand/collapse meals, adjust food quantities with +/− (persisted across refreshes)
+4. **Food Q&A** — Click the ❓ icon on any food for AI-powered answers scoped to that food and your goals
+5. **Plan Optimizer** — Floating button to ask diet questions (cheat meals, adjustments); conversations are saved to your plan
+6. **Login Gate** — Anonymous users see the first 2 meals per day free; login unlocks the full plan
+7. **Auto-save & Sync** — For logged-in users the plan record stays in sync in the DB as each day is generated
+8. **Dashboard** — BMI, goal progress computed from real weight logs, plan history, one-click new plan
+9. **Weight Tracking** — Log your weight from the dashboard; the progress bar and BMI update from actual data
+10. **Rate Limiting** — AI-calling routes are throttled per user/IP to protect your API spend
+11. **Mobile-first** — Fully responsive, touch-optimized UI
+
+---
+
+## 🤖 AI Provider Switching
+
+All AI calls go through `lib/ai/`, which picks a provider at request time from the `AI_PROVIDER` env var — **no code changes needed to switch**:
+
+```env
+AI_PROVIDER="groq"     # groq | openai | gemini | anthropic
+```
+
+| Provider | Default model | Env vars | Notes |
+|----------|---------------|----------|-------|
+| `groq` | `llama-3.3-70b-versatile` | `GROQ_API_KEY`, `GROQ_MODEL` | Free tier — good for development |
+| `openai` | `gpt-4o-mini` | `OPENAI_API_KEY`, `OPENAI_MODEL` | JSON mode via `response_format` |
+| `gemini` | `gemini-2.0-flash` | `GEMINI_API_KEY`, `GEMINI_MODEL` | JSON via `responseMimeType` |
+| `anthropic` | `claude-opus-4-8` | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | Guaranteed-schema structured outputs |
+
+Only the key for the **active** provider is required — missing keys for unused providers never crash the app.
+
+### Layout
+
+```
+lib/ai/
+├── index.js              # Provider switch — the only import the app uses
+├── prompts.js            # Shared prompt text + defensive JSON parsing
+├── schemas.js            # JSON schemas (used by Anthropic structured outputs)
+└── providers/
+    ├── groq.js
+    ├── openai.js
+    ├── gemini.js
+    └── anthropic.js
+```
+
+Each provider implements the same four functions: `generatePlanMeta`, `generateDayPlan`, `askFoodQuestion`, `optimizeDietPlan`.
 
 ---
 
@@ -36,10 +73,10 @@ A full-stack Next.js 14 application that generates personalized 7-day AI-powered
 
 ### 1. Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - PostgreSQL database (use [Neon](https://neon.tech) for free cloud Postgres)
 - Google OAuth credentials
-- OpenAI API key
+- An API key for at least one AI provider (Groq is free: https://console.groq.com)
 
 ### 2. Clone & Install
 
@@ -51,57 +88,46 @@ npm install
 
 ### 3. Environment Variables
 
-Create a `.env.local` file (copy from `.env.example`):
+Copy `.env.example` to `.env` and fill in your values. The essentials:
 
 ```env
-# PostgreSQL connection string
 DATABASE_URL="postgresql://user:password@host:5432/dietapp?sslmode=require"
 
-# NextAuth
 NEXTAUTH_URL="http://localhost:3000"
 NEXTAUTH_SECRET="run: openssl rand -base64 32"
 
-# Google OAuth — get from https://console.cloud.google.com
 GOOGLE_CLIENT_ID="your-google-client-id"
 GOOGLE_CLIENT_SECRET="your-google-client-secret"
 
-# Google Gemini — free key from https://aistudio.google.com/app/apikey
-GEMINI_API_KEY="AIza..."
+AI_PROVIDER="groq"
+GROQ_API_KEY="gsk_..."
 
-# App URL
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 ```
 
 ### 4. Google OAuth Setup
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com)
-2. Create a new project or select existing
-3. Enable **Google+ API** and **OAuth 2.0**
-4. Create OAuth credentials → Web application
-5. Add authorized redirect URIs:
+2. Create OAuth credentials → Web application
+3. Add authorized redirect URIs:
    - `http://localhost:3000/api/auth/callback/google` (dev)
    - `https://yourdomain.com/api/auth/callback/google` (prod)
 
 ### 5. Database Setup
 
 ```bash
-# Generate Prisma client
-npx prisma generate
-
-# Push schema to database (creates tables)
-npx prisma db push
-
-# Optional: Open Prisma Studio to view data
-npx prisma studio
+npx prisma generate    # generate the client
+npx prisma db push     # create/update tables
+npx prisma studio      # optional: browse data
 ```
 
-### 6. Run Development Server
+### 6. Run
 
 ```bash
-npm run dev
+npm run dev    # development server on :3000
+npm test       # unit tests (prompt helpers, validation, BMI/timeline logic)
+npm run build  # production build
 ```
-
-Open [http://localhost:3000](http://localhost:3000)
 
 ---
 
@@ -110,9 +136,9 @@ Open [http://localhost:3000](http://localhost:3000)
 1. Push code to GitHub
 2. Import project in [Vercel](https://vercel.com)
 3. Add all environment variables in Vercel project settings
-4. Deploy!
+4. Deploy
 
-Vercel auto-detects Next.js and configures everything.
+> **Note on rate limiting:** the built-in limiter is in-memory (per serverless instance). It stops runaway loops and casual abuse, but for exact global limits swap `lib/rate-limit.js` for a Redis/Upstash-backed implementation.
 
 ---
 
@@ -123,87 +149,58 @@ diet-app/
 ├── app/
 │   ├── api/
 │   │   ├── auth/[...nextauth]/    # NextAuth handler
-│   │   ├── diet/generate/         # Diet plan generation
-│   │   ├── diet/optimize/         # Plan optimization
-│   │   ├── food/query/            # Food Q&A
-│   │   └── user/plans/            # User plan history
+│   │   ├── diet/generate/         # Plan meta + per-day generation (rate limited)
+│   │   ├── diet/optimize/         # Plan optimizer chat (persisted, rate limited)
+│   │   ├── diet/save/             # Create/update the plan record in the DB
+│   │   ├── food/query/            # Food Q&A chat (persisted, rate limited)
+│   │   └── user/
+│   │       ├── plans/             # Plan history
+│   │       └── weight/            # Weight logging
 │   ├── auth/signin/               # Sign-in page
-│   ├── dashboard/                 # User dashboard
+│   ├── dashboard/                 # Dashboard (auth required)
 │   ├── diet/                      # Diet plan view
-│   ├── onboarding/                # 3-step setup
-│   ├── globals.css                # Design tokens + utilities
-│   └── layout.tsx                 # Root layout
+│   └── onboarding/                # 3-step setup + generating screen
 ├── components/
-│   ├── dashboard/                 # Dashboard components
-│   ├── diet/                      # Diet page components
-│   │   ├── DietHeader.tsx
-│   │   ├── DietDayTabs.tsx
-│   │   ├── DietMealCard.tsx       # Food items with +/− controls
-│   │   ├── DietSummaryBar.tsx
-│   │   ├── FoodQueryModal.tsx     # AI food Q&A popup
-│   │   ├── LoginPromptOverlay.tsx # Login gate
-│   │   └── DietOptimizeButton.tsx # Floating plan optimizer
-│   └── onboarding/
-│       ├── StepPersonalInfo.tsx
-│       ├── StepGoals.tsx          # With timeline warnings
-│       ├── StepLocation.tsx       # Geolocation + preferences
-│       └── StepGenerating.tsx     # Loading animation
+│   ├── dashboard/DashboardClient.jsx   # Stats, real goal progress, weight logging
+│   ├── diet/                           # Meal cards, tabs, Q&A modal, optimizer
+│   └── onboarding/                     # Step components
 ├── lib/
-│   ├── auth.ts                    # NextAuth config
-│   ├── openai.ts                  # GPT-4o diet generation
-│   ├── prisma.ts                  # Prisma client
-│   └── utils.ts                   # BMI, timeline, formatting
-├── prisma/
-│   └── schema.prisma              # Database schema
-├── store/
-│   └── onboarding.ts              # Zustand store
-└── types/
-    └── next-auth.d.ts             # Type extensions
+│   ├── ai/                        # Multi-provider AI layer (see above)
+│   ├── auth.js                    # NextAuth config
+│   ├── planStorage.js             # Client-side plan persistence (localStorage)
+│   ├── prisma.js                  # Prisma client
+│   ├── rate-limit.js              # Sliding-window rate limiter
+│   └── utils.js                   # BMI, timeline safety, validation, formatting
+├── prisma/schema.prisma           # User, UserProfile, DietPlan, ChatMessage, WeightLog
+├── store/onboarding.js            # Zustand store (persisted)
+└── tests/                         # node --test suites
 ```
 
 ---
 
 ## 🔧 Customization
 
-### Change currency
-In `lib/openai.ts`, update the `currency` field in the profile object.
-
-### Add meal types
-In `lib/openai.ts`, modify the prompt to add/remove meal slots.
-
-### Change AI model
-In `lib/openai.ts`, update `model: 'gemini-2.0-flash'` to any Gemini model (e.g. `gemini-1.5-pro` for higher quality, `gemini-2.0-flash-lite` for faster/cheaper).
-
-### Extend DB schema
-Edit `prisma/schema.prisma` and run `npx prisma db push`.
+- **Switch AI provider/model** — set `AI_PROVIDER` and the matching `*_MODEL` env var; restart. No code changes.
+- **Change meal slots** — edit the prompt in `lib/ai/prompts.js` (`dayPlanPrompt`); all providers pick it up automatically.
+- **Adjust rate limits** — the per-route limits live at the top of each route file in `app/api/`.
+- **Extend DB schema** — edit `prisma/schema.prisma`, then `npx prisma db push` (keep changes additive for existing users).
 
 ---
 
 ## 🛡️ Security Notes
 
-- Never commit `.env.local` to git (already in `.gitignore`)
+- Never commit `.env` to git (already in `.gitignore`)
 - `NEXTAUTH_SECRET` must be a strong random string
-- API routes validate session before saving to DB
-- Diet generation works for guests but doesn't persist without login
-
----
-
-## 📱 Mobile Support
-
-- Responsive design works on all screen sizes
-- Geolocation API for automatic city detection
-- Touch-optimized quantity controls
-- Bottom sheet modals on mobile
+- API routes validate session before writing; chat/plan writes verify the record belongs to the requesting user
+- AI keys are used server-side only (`server-only` guards the AI layer from client bundling)
+- AI-calling routes are rate limited per user/IP
 
 ---
 
 ## 🐛 Troubleshooting
 
-**Prisma errors:** Run `npx prisma generate` after any schema change
-
-**Auth errors:** Check `NEXTAUTH_URL` matches your actual URL exactly
-
-**Gemini timeout:** Diet plan generation can take 10–20s — this is normal. `gemini-2.0-flash` is fast; use `gemini-1.5-pro` if you want higher quality.
-
-**Google OAuth error:** Ensure redirect URI in Google Console matches exactly (including trailing slash)
-# NutriPlan-AI
+- **Prisma errors:** run `npx prisma generate` after any schema change
+- **Auth errors:** check `NEXTAUTH_URL` matches your actual URL exactly
+- **Slow generation:** each day takes ~10s on Groq's free tier — this is normal
+- **429 Too Many Requests:** you hit the per-hour AI rate limit; wait or raise the limits in the route files
+- **Google OAuth error:** redirect URI in Google Console must match exactly

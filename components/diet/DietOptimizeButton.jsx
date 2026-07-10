@@ -10,7 +10,7 @@ const EXAMPLE_QUESTIONS = [
   'I skipped breakfast today. What should I do now?',
 ]
 
-export function DietOptimizeButton({ plan, userProfile }) {
+export function DietOptimizeButton({ plan, userProfile, planId }) {
   const [open, setOpen] = useState(false)
   const [question, setQuestion] = useState('')
   const [response, setResponse] = useState('')
@@ -25,10 +25,10 @@ export function DietOptimizeButton({ plan, userProfile }) {
       const res = await fetch('/api/diet/optimize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, currentPlan: plan, userProfile }),
+        body: JSON.stringify({ question, currentPlan: plan, userProfile, planId }),
       })
-      const { advice } = await res.json()
-      setResponse(advice || 'Unable to generate advice at this time.')
+      const { advice, error } = await res.json()
+      setResponse(advice || error || 'Unable to generate advice at this time.')
     } catch {
       setResponse('Something went wrong. Please try again.')
     } finally {

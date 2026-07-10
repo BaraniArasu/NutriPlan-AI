@@ -7,7 +7,7 @@ export default async function DashboardPage() {
   const session = await auth()
   if (!session?.user?.id) redirect('/auth/signin')
 
-  const [profile, plans] = await Promise.all([
+  const [profile, plans, weightLogs] = await Promise.all([
     prisma.userProfile.findUnique({ where: { userId: session.user.id } }),
     prisma.dietPlan.findMany({
       where: { userId: session.user.id },
@@ -22,6 +22,11 @@ export default async function DashboardPage() {
         createdAt: true,
       },
     }),
+    prisma.weightLog.findMany({
+      where: { userId: session.user.id },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, weight: true, createdAt: true },
+    }),
   ])
 
   return (
@@ -29,6 +34,7 @@ export default async function DashboardPage() {
       user={session.user}
       profile={profile}
       plans={plans}
+      weightLogs={weightLogs}
     />
   )
 }
